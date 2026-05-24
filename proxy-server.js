@@ -1,111 +1,75 @@
 /**
- * JobScout Proxy Server
- * ---------------------
- * Sits between the browser and job APIs to solve CORS.
- * The browser calls this server; this server calls the real APIs.
- *
- * Deploy free on Railway → https://railway.app
- *   1. Push this file + package.json to a GitHub repo
- *   2. New project → Deploy from GitHub repo
- *   3. Railway auto-detects Node.js and runs "npm start"
- *   4. Copy the generated URL into JobScout Settings → Proxy Server URL
- *
- * Or run locally:
- *   npm install && node proxy-server.js
- *   Then use http://localhost:3000 as your proxy URL
+ * JobScout Proxy Server — v2 (native fetch, no node-fetch)
+ * Requires Node 18+ (Railway default)
  */
-
-const express  = require("express");
-const cors     = require("cors");
-const fetch    = require("node-fetch");
+const express = require("express");
+const cors    = require("cors");
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-/* Allow requests from any origin (the browser's Claude.ai domain) */
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-/* ── Health check ─────────────────────────────── */
+/* Health check — visit your Railway URL to confirm it's running */
 app.get("/", (req, res) => {
-  res.json({ status: "ok", service: "JobScout Proxy", version: "1.0.0" });
+  res.json({ status: "ok", service: "JobScout Proxy", node: process.version });
 });
 
-/* ── Helper: forward errors cleanly ──────────── */
-const forward = async (res, fn) => {
+/* ── 1. Remotive ── */
+app.get("/remotive", async (req, res) => {
   try {
-    const data = await fn();
-    res.json(data);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-};
-
-/* ── 1. Remotive ─────────────────────────────── */
-app.get("/remotive", (req, res) => forward(res, async () => {
-  const params = new URLSearchParams(req.query);
-  const r = await fetch(`https://remotive.com/api/remote-jobs?${params}`);
-  if (!r.ok) throw new Error(`Remotive error: ${r.status}`);
-  return r.json();
-}));
-
-/* ── 2. Arbeitnow ────────────────────────────── */
-app.get("/arbeitnow", (req, res) => forward(res, async () => {
-  const params = new URLSearchParams(req.query);
-  const r = await fetch(`https://www.arbeitnow.com/api/job-board-api?${params}`);
-  if (!r.ok) throw new Error(`Arbeitnow error: ${r.status}`);
-  return r.json();
-}));
-
-/* ── 3. The Muse ─────────────────────────────── */
-app.get("/themuse", (req, res) => forward(res, async () => {
-  const params = new URLSearchParams(req.query);
-  const r = await fetch(`https://www.themuse.com/api/public/jobs?${params}`);
-  if (!r.ok) throw new Error(`The Muse error: ${r.status}`);
-  return r.json();
-}));
-
-/* ── 4. JSearch (RapidAPI) ───────────────────── */
-/* Pass your RapidAPI key as header: x-rapidapi-key */
-app.get("/jsearch", (req, res) => forward(res, async () => {
-  const apiKey = req.headers["x-rapidapi-key"];
-  if (!apiKey) throw new Error("Missing x-rapidapi-key header");
-  const params = new URLSearchParams(req.query);
-  const r = await fetch(`https://jsearch.p.rapidapi.com/search?${params}`, {
-    headers: {
-      "X-RapidAPI-Key":  apiKey,
-      "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
-    },
-  });
-  if (!r.ok) throw new Error(`JSearch error: ${r.status}`);
-  return r.json();
-}));
-
-/* ── 5. Adzuna ───────────────────────────────── */
-/* Pass app_id and app_key as query params (already included by the frontend) */
-app.get("/adzuna", (req, res) => forward(res, async () => {
-  const params = new URLSearchParams(req.query);
-  const r = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${params}`);
-  if (!r.ok) throw new Error(`Adzuna error: ${r.status}`);
-  return r.json();
-}));
-
-/* ── 6. Reed.co.uk ───────────────────────────── */
-/* Pass your Reed API key as header: authorization (Basic base64(key:)) */
-app.get("/reed", (req, res) => forward(res, async () => {
-  const auth = req.headers["authorization"];
-  if (!auth) throw new Error("Missing Authorization header");
-  const params = new URLSearchParams(req.query);
-  const r = await fetch(`https://www.reed.co.uk/api/1.0/search?${params}`, {
-    headers: { Authorization: auth, Accept: "application/json" },
-  });
-  if (!r.ok) throw new Error(`Reed error: ${r.status}`);
-  return r.json();
-}));
-
-/* ── Start ───────────────────────────────────── */
-app.listen(PORT, () => {
-  console.log(`✅ JobScout proxy running on http://localhost:${PORT}`);
-  console.log("Endpoints: /remotive /arbeitnow /themuse /jsearch /adzuna /reed");
+    const r = await fetch(`https://remotive.com/api/remote-jobs?${new URLSearchParams(req.query)}`);
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+/* ── 2. Arbeitnow ── */
+app.get("/arbeitnow", async (req, res) => {
+  try {
+    const r = await fetch(`https://www.arbeitnow.com/api/job-board-api?${new URLSearchParams(req.query)}`);
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 3. The Muse ── */
+app.get("/themuse", async (req, res) => {
+  try {
+    const r = await fetch(`https://www.themuse.com/api/public/jobs?${new URLSearchParams(req.query)}`);
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 4. JSearch (RapidAPI) — send key as header x-rapidapi-key ── */
+app.get("/jsearch", async (req, res) => {
+  try {
+    const key = req.headers["x-rapidapi-key"];
+    if (!key) return res.status(400).json({ error: "Missing x-rapidapi-key header" });
+    const r = await fetch(`https://jsearch.p.rapidapi.com/search?${new URLSearchParams(req.query)}`, {
+      headers: { "X-RapidAPI-Key": key, "X-RapidAPI-Host": "jsearch.p.rapidapi.com" },
+    });
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 5. Adzuna — app_id & app_key already in query params ── */
+app.get("/adzuna", async (req, res) => {
+  try {
+    const r = await fetch(`https://api.adzuna.com/v1/api/jobs/us/search/1?${new URLSearchParams(req.query)}`);
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── 6. Reed.co.uk — send key as header authorization ── */
+app.get("/reed", async (req, res) => {
+  try {
+    const auth = req.headers["authorization"];
+    if (!auth) return res.status(400).json({ error: "Missing Authorization header" });
+    const r = await fetch(`https://www.reed.co.uk/api/1.0/search?${new URLSearchParams(req.query)}`, {
+      headers: { Authorization: auth, Accept: "application/json" },
+    });
+    res.status(r.status).json(await r.json());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.listen(PORT, () => console.log(`JobScout proxy running on port ${PORT}`));
